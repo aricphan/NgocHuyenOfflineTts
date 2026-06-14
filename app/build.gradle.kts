@@ -109,9 +109,17 @@ val downloadSherpaOnnxNative by tasks.registering {
         if (extractDir.exists()) extractDir.deleteRecursively()
         extractDir.mkdirs()
 
-        // Windows 10/11 has tar.exe. Git Bash/macOS/Linux also have tar.
-        project.exec {
-            commandLine("tar", "-xjf", tarFile.absolutePath, "-C", extractDir.absolutePath)
+        // Windows 10/11 có sẵn tar.exe. Dùng ProcessBuilder để tránh lỗi Kotlin DSL `exec`.
+        val tarProcess = ProcessBuilder(
+            "tar", "-xjf", tarFile.absolutePath, "-C", extractDir.absolutePath
+        )
+            .redirectErrorStream(true)
+            .start()
+
+        val tarOutput = tarProcess.inputStream.bufferedReader().readText()
+        val tarExitCode = tarProcess.waitFor()
+        check(tarExitCode == 0) {
+            "Extract sherpa-onnx failed. Exit code: $tarExitCode\n$tarOutput"
         }
 
         val foundJni = extractDir.walkTopDown().firstOrNull { it.isDirectory && it.name == "jniLibs" }

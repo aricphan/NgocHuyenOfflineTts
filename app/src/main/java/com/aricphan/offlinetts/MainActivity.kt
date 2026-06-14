@@ -3,6 +3,7 @@ package com.aricphan.offlinetts
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.content.res.AssetManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -39,8 +40,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import kotlin.math.max
-
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 class MainActivity : ComponentActivity() {
     private var tts: OfflineTts? = null
     private var audioTrack: AudioTrack? = null
@@ -58,9 +62,28 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun splitTextForTts(text: String): List<String> {
+        val normalized = text
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .replace("\n", " ")
 
+        return normalized
+            .split(Regex("(?<=[.!?…。！？])\\s+"))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+    }
     private fun initEngineIfNeeded(): String {
         if (tts != null) return "Sẵn sàng"
+
+        // Sherpa-ONNX Android không đọc trực tiếp espeak-ng-data từ assets.
+        // Bắt buộc copy thư mục này ra filesDir rồi truyền đường dẫn thật vào dataDir.
+        val espeakDataDir = File(filesDir, "espeak-ng-data")
+        copyAssetFolderIfNeeded(
+            assetManager = assets,
+            assetPath = "voice/espeak-ng-data",
+            targetDir = espeakDataDir
+        )
 
         val threadCount = max(1, Runtime.getRuntime().availableProcessors() / 2)
         val config = OfflineTtsConfig(
@@ -68,7 +91,7 @@ class MainActivity : ComponentActivity() {
                 vits = OfflineTtsVitsModelConfig(
                     model = "voice/ngoc-huyen.onnx",
                     tokens = "voice/tokens.txt",
-                    dataDir = "voice/espeak-ng-data",
+                    dataDir = espeakDataDir.absolutePath,
                     noiseScale = 0.667f,
                     noiseScaleW = 0.8f,
                     lengthScale = 1.0f
@@ -78,11 +101,51 @@ class MainActivity : ComponentActivity() {
                 provider = "cpu"
             ),
             maxNumSentences = 1,
-            silenceScale = 0.2f
+            silenceScale = 0.5f
         )
 
         tts = OfflineTts(assetManager = assets, config = config)
         return "Đã tải model Ngọc Huyền - offline"
+    }
+
+    private fun copyAssetFolderIfNeeded(
+        assetManager: AssetManager,
+        assetPath: String,
+        targetDir: File
+    ) {
+        // Nếu đã copy đủ dữ liệu rồi thì bỏ qua để mở app nhanh hơn.
+        val marker = File(targetDir, ".copied")
+        if (targetDir.exists() && marker.exists()) return
+
+        if (targetDir.exists()) targetDir.deleteRecursively()
+        targetDir.mkdirs()
+        copyAssetFolder(assetManager, assetPath, targetDir)
+        marker.writeText("copied")
+    }
+
+    private fun copyAssetFolder(
+        assetManager: AssetManager,
+        assetPath: String,
+        targetDir: File
+    ) {
+        val children = assetManager.list(assetPath)?.toList().orEmpty()
+        if (children.isEmpty()) {
+            // Đây là file, không phải thư mục.
+            targetDir.parentFile?.mkdirs()
+            assetManager.open(assetPath).use { input ->
+                targetDir.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            return
+        }
+
+        targetDir.mkdirs()
+        for (child in children) {
+            val childAssetPath = "$assetPath/$child"
+            val childTarget = File(targetDir, child)
+            copyAssetFolder(assetManager, childAssetPath, childTarget)
+        }
     }
 
     private suspend fun speakText(text: String, speed: Float, onStatus: (String) -> Unit) {
@@ -97,14 +160,40 @@ class MainActivity : ComponentActivity() {
 
         speakJob = kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
             try {
-                val audio = withContext(Dispatchers.Default) {
+                val sentences = splitTextForTts(cleaned)
+
+                withContext(Dispatchers.Default) {
                     initEngineIfNeeded()
-                    onStatus("Đang tạo giọng đọc offline...")
-                    tts!!.generate(text = cleaned, sid = 0, speed = speed)
                 }
 
-                onStatus("Đang phát audio...")
-                playFloatAudio(audio.samples, audio.sampleRate)
+                for ((i, sentence) in sentences.withIndex()) {
+                    if (!kotlinx.coroutines.currentCoroutineContext().isActive) break
+
+                    onStatus("Đang tạo câu ${i + 1}/${sentences.size}...")
+
+                    val audio = withContext(Dispatchers.Default) {
+                        tts!!.generate(sentence, 0, speed)
+                    }
+
+                    onStatus("Đang phát câu ${i + 1}/${sentences.size}...")
+                    playFloatAudio(audio.samples, audio.sampleRate)
+
+                    val pauseMs = when {
+                        sentence.endsWith(".") ||
+                                sentence.endsWith("!") ||
+                                sentence.endsWith("?") ||
+                                sentence.endsWith("…") -> 120L
+
+                        sentence.endsWith(",") ||
+                                sentence.endsWith(";") ||
+                                sentence.endsWith(":") -> 100L
+
+                        else -> 90L
+                    }
+
+                    kotlinx.coroutines.delay(pauseMs)
+                }
+
                 onStatus("Đã đọc xong")
             } catch (e: Exception) {
                 onStatus("Lỗi: ${e.message ?: e.javaClass.simpleName}")
@@ -176,14 +265,18 @@ private fun TtsScreen(
     stop: () -> Unit
 ) {
     var text by remember {
-        mutableStateOf("Xin chào, đây là ứng dụng đọc tiếng Việt offline bằng giọng Ngọc Huyền.")
+        mutableStateOf("Quanh thân có một đầu Huyền Quy, một con long mã. Trong đó, Huyền Quy nằm rạp trên mặt đất, miệng lớn thôn hấp lấy năng lượng, giống như rất lợi hại tham ăn bộ dáng . Còn Long Mã, thì là treo ở không trung, không ngừng mà bay lượn lấy.")
     }
     var status by remember { mutableStateOf("Đang chờ") }
     var speed by remember { mutableFloatStateOf(1.0f) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        status = withContext(Dispatchers.Default) { initEngine() }
+        status = try {
+            withContext(Dispatchers.Default) { initEngine() }
+        } catch (e: Exception) {
+            "Lỗi khởi tạo: ${e.message ?: e.javaClass.simpleName}"
+        }
     }
 
     Column(
