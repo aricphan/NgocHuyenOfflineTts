@@ -1,33 +1,14 @@
-# Ngọc Huyền Offline TTS Android
+# NgocHuyenOfflineTts
 
-App Android đọc TTS offline bằng model `ngoc-huyen.onnx` từ repo:
+App Android đọc TTS offline bằng model Ngọc Huyền ONNX và Sherpa-ONNX.
 
-https://github.com/aricphan/onnxvoice/tree/main/assets
+## Cách chạy
 
-## Cách dùng trong Android Studio
+1. Mở thư mục này bằng Android Studio.
+2. Bấm **Sync Now**.
+3. Build lần đầu sẽ tự tải:
+   - assets giọng đọc từ `https://github.com/aricphan/onnxvoice`
+   - native libs Sherpa-ONNX từ release chính chủ `v1.13.2`
+4. Bấm Run.
 
-1. Giải nén file ZIP này.
-2. Mở thư mục `NgocHuyenOfflineTts` bằng Android Studio.
-3. Bấm **Sync Now** nếu Android Studio hỏi.
-4. Bấm **Run**.
-
-Lần build đầu tiên Gradle sẽ tự tải assets từ `aricphan/onnxvoice` và copy vào:
-
-```text
-app/src/main/assets/voice/
-```
-
-Sau khi APK đã build/cài vào máy, app đọc offline, không cần mạng để tạo giọng nói.
-
-## Nếu muốn tự copy assets thay vì tải tự động
-
-Copy các file này vào `app/src/main/assets/voice/`:
-
-```text
-ngoc-huyen.onnx
-ngoc-huyen.onnx.json
-tokens.txt
-espeak-ng-data/
-```
-
-Sau đó build/run bình thường.
+Nếu Gradle báo không chạy được lệnh `tar`, hãy cài Git for Windows hoặc giải nén file `sherpa-onnx-v1.13.2-android.tar.bz2` thủ công rồi copy thư mục `jniLibs` vào `app/src/main/jniLibs`.

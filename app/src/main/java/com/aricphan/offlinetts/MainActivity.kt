@@ -2,7 +2,6 @@ package com.aricphan.offlinetts
 
 import android.media.AudioAttributes
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -36,7 +35,6 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
-import com.k2fsa.sherpa.onnx.GenerationConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -102,14 +100,7 @@ class MainActivity : ComponentActivity() {
                 val audio = withContext(Dispatchers.Default) {
                     initEngineIfNeeded()
                     onStatus("Đang tạo giọng đọc offline...")
-                    tts!!.generateWithConfig(
-                        text = cleaned,
-                        config = GenerationConfig(
-                            speed = speed,
-                            sid = 0,
-                            silenceScale = 0.2f
-                        )
-                    )
+                    tts!!.generate(text = cleaned, sid = 0, speed = speed)
                 }
 
                 onStatus("Đang phát audio...")
@@ -122,6 +113,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun playFloatAudio(samples: FloatArray, sampleRate: Int) {
+        if (samples.isEmpty()) return
+
         val pcm = ShortArray(samples.size)
         for (i in samples.indices) {
             val v = samples[i].coerceIn(-1.0f, 1.0f)
@@ -132,7 +125,7 @@ class MainActivity : ComponentActivity() {
             sampleRate,
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT
-        ).coerceAtLeast(pcm.size * 2)
+        ).coerceAtLeast(4096)
 
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
@@ -213,30 +206,20 @@ private fun TtsScreen(
         )
 
         Text("Tốc độ: ${"%.2f".format(speed)}x")
-        Slider(
-            value = speed,
-            onValueChange = { speed = it },
-            valueRange = 0.7f..1.4f
-        )
+        Slider(value = speed, onValueChange = { speed = it }, valueRange = 0.7f..1.4f)
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = {
-                scope.launch {
-                    speak(text, speed) { newStatus -> status = newStatus }
-                }
-            }) {
-                Text("Đọc")
-            }
+                scope.launch { speak(text, speed) { newStatus -> status = newStatus } }
+            }) { Text("Đọc") }
 
             Button(onClick = {
                 stop()
                 status = "Đã dừng"
-            }) {
-                Text("Dừng")
-            }
+            }) { Text("Dừng") }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Ghi chú: Lần build đầu tiên sẽ tự tải assets từ repo onnxvoice rồi nhúng vào APK. Sau khi cài, app đọc offline.")
+        Text("Build lần đầu sẽ tự tải model từ repo onnxvoice và tải native Sherpa-ONNX chính chủ. Sau khi cài lên điện thoại, app đọc offline.")
     }
 }
